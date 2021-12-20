@@ -134,3 +134,14 @@ type EnvBindingStatus struct {
 	Envs               []EnvStatus         `json:"envs"`
 	ClusterConnections []ClusterConnection `json:"clusterConnections"`
 }
+
+type PatchTarget struct {
+	Target struct {
+		Type     string   `json:"type"`
+		Selector []string `json:"selector"`
+	}
+	Component struct {
+		Properties *runtime.RawExtension `json:"properties,omitempty"`
+		Traits     []EnvTraitPatch       `json:"traits,omitempty"`
+	}
+}
