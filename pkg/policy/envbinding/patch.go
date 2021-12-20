@@ -19,6 +19,7 @@ package envbinding
 import (
 	"encoding/json"
 	"fmt"
+	"k8s.io/kubectl/pkg/util/slice"
 
 	"github.com/imdario/mergo"
 	"github.com/pkg/errors"
@@ -184,4 +185,49 @@ func PatchApplicationByEnvBindingEnv(app *v1beta1.Application, policyName string
 		}
 	}
 	return nil, fmt.Errorf("target env %s in policy %s not found", envName, policyName)
+}
+
+// PatchApplicationByTarget
+func PatchApplicationByTarget(base *v1beta1.Application, patchTarget *v1alpha1.PatchTarget) (*v1beta1.Application, error) {
+	newApp := base.DeepCopy()
+	compMaps := map[string]*common.ApplicationComponent{}
+	var compOrders []string
+	patchComponent := v1alpha1.EnvComponentPatch{
+		Properties: patchTarget.Component.Properties,
+		Traits:     patchTarget.Component.Traits,
+	}
+
+	// patch components
+	var errs errors2.ErrorList
+	var err error
+	for _, comp := range base.Spec.Components {
+		compMaps[comp.Name] = comp.DeepCopy()
+
+		if comp.Type == patchTarget.Target.Type {
+			compMaps[comp.Name], err = MergeComponent(&comp, patchComponent.DeepCopy())
+			if err != nil {
+				errs.Append(errors.Wrapf(err, "failed to merge component %s", comp.Name))
+			}
+		}
+
+		if !slice.ContainsString(compOrders, comp.Name, nil) {
+			compOrders = append(compOrders, comp.Name)
+		}
+	}
+
+	if errs.HasError() {
+		return nil, errors.Wrapf(err, "failed to merge application components")
+	}
+	newApp.Spec.Components = []common.ApplicationComponent{}
+
+	// if selector is enabled, filter
+	selector := &v1alpha1.EnvSelector{Components: patchTarget.Target.Selector}
+	compOrders = filterComponents(compOrders, selector)
+
+	// fill in new application
+	for _, compName := range compOrders {
+		newApp.Spec.Components = append(newApp.Spec.Components, *compMaps[compName])
+	}
+
+	return newApp, nil
 }
