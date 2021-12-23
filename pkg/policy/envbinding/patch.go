@@ -204,7 +204,10 @@ func PatchApplicationByTarget(base *v1beta1.Application, patchTarget *v1alpha1.P
 		compMaps[comp.Name] = comp.DeepCopy()
 
 		if comp.Type == patchTarget.Target.Type {
-			compMaps[comp.Name], err = MergeComponent(&comp, patchComponent.DeepCopy())
+			pc := patchComponent.DeepCopy()
+			pc.Name = comp.Name
+			pc.Type = comp.Type
+			compMaps[comp.Name], err = MergeComponent(&comp, pc)
 			if err != nil {
 				errs.Append(errors.Wrapf(err, "failed to merge component %s", comp.Name))
 			}
@@ -221,7 +224,10 @@ func PatchApplicationByTarget(base *v1beta1.Application, patchTarget *v1alpha1.P
 	newApp.Spec.Components = []common.ApplicationComponent{}
 
 	// if selector is enabled, filter
-	selector := &v1alpha1.EnvSelector{Components: patchTarget.Target.Selector}
+	var selector *v1alpha1.EnvSelector
+	if patchTarget.Target.Selector != nil {
+		selector = &v1alpha1.EnvSelector{Components: patchTarget.Target.Selector}
+	}
 	compOrders = filterComponents(compOrders, selector)
 
 	// fill in new application
