@@ -19,17 +19,14 @@ package envbinding
 import (
 	"encoding/json"
 	"fmt"
-	"k8s.io/kubectl/pkg/util/slice"
-
 	"github.com/imdario/mergo"
-	"github.com/pkg/errors"
-	"k8s.io/apimachinery/pkg/runtime"
-
 	"github.com/oam-dev/kubevela/apis/core.oam.dev/common"
 	"github.com/oam-dev/kubevela/apis/core.oam.dev/v1alpha1"
 	"github.com/oam-dev/kubevela/apis/core.oam.dev/v1beta1"
 	"github.com/oam-dev/kubevela/pkg/oam/util"
 	errors2 "github.com/oam-dev/kubevela/pkg/utils/errors"
+	"github.com/pkg/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // MergeRawExtension merge two raw extension
@@ -188,33 +185,39 @@ func PatchApplicationByEnvBindingEnv(app *v1beta1.Application, policyName string
 }
 
 // PatchApplicationByTarget
-func PatchApplicationByTarget(base *v1beta1.Application, patchTarget *v1alpha1.PatchTarget) (*v1beta1.Application, error) {
+func PatchApplicationByTarget(base *v1beta1.Application, patchTarget *v1alpha1.PatchTarget, selector *v1alpha1.EnvSelector, patchedApp *v1beta1.Application) (*v1beta1.Application, error) {
 	newApp := base.DeepCopy()
+	// init components
 	compMaps := map[string]*common.ApplicationComponent{}
 	var compOrders []string
-	patchComponent := v1alpha1.EnvComponentPatch{
-		Properties: patchTarget.Component.Properties,
-		Traits:     patchTarget.Component.Traits,
+	for _, comp := range base.Spec.Components {
+		compMaps[comp.Name] = comp.DeepCopy()
+		compOrders = append(compOrders, comp.Name)
 	}
 
-	// patch components
+	pcompMaps := map[string]*common.ApplicationComponent{}
+	if patchedApp != nil {
+		for _, comp := range patchedApp.Spec.Components {
+			pcompMaps[comp.Name] = comp.DeepCopy()
+		}
+	}
+
 	var errs errors2.ErrorList
 	var err error
 	for _, comp := range base.Spec.Components {
-		compMaps[comp.Name] = comp.DeepCopy()
-
-		if comp.Type == patchTarget.Target.Type {
-			pc := patchComponent.DeepCopy()
-			pc.Name = comp.Name
-			pc.Type = comp.Type
-			compMaps[comp.Name], err = MergeComponent(&comp, pc)
-			if err != nil {
-				errs.Append(errors.Wrapf(err, "failed to merge component %s", comp.Name))
-			}
+		pc, skip := matchTarget(&comp, patchTarget)
+		if skip != nil {
+			continue
 		}
 
-		if !slice.ContainsString(compOrders, comp.Name, nil) {
-			compOrders = append(compOrders, comp.Name)
+		if pcomp, found := pcompMaps[comp.Name]; found == true {
+			compMaps[comp.Name], err = MergeComponent(pcomp, pc)
+		} else {
+			compMaps[comp.Name], err = MergeComponent(&comp, pc)
+		}
+
+		if err != nil {
+			errs = append(errs, errors.Wrapf(err, "failed to merge component %s", comp.Name))
 		}
 	}
 
@@ -223,13 +226,53 @@ func PatchApplicationByTarget(base *v1beta1.Application, patchTarget *v1alpha1.P
 	}
 	newApp.Spec.Components = []common.ApplicationComponent{}
 
-	// if selector is enabled, filter
-	var selector *v1alpha1.EnvSelector
-	if patchTarget.Target.Selector != nil {
-		selector = &v1alpha1.EnvSelector{Components: patchTarget.Target.Selector}
-	}
 	compOrders = filterComponents(compOrders, selector)
 
+	// if selector is enabled, filter
+	var targetSelector *v1alpha1.EnvSelector
+	if patchTarget.Target.Selector != nil || len(patchTarget.Target.Selector) == 0 {
+		targetSelector = &v1alpha1.EnvSelector{Components: patchTarget.Target.Selector}
+	}
+	compOrders = filterComponents(compOrders, targetSelector)
+
+	// fill in new application
+	for _, compName := range compOrders {
+		newApp.Spec.Components = append(newApp.Spec.Components, *compMaps[compName])
+	}
+
+	return newApp, nil
+}
+
+func matchTarget(base *common.ApplicationComponent, patchTarget *v1alpha1.PatchTarget) (componentPatched *v1alpha1.EnvComponentPatch, skip error) {
+	if base.Type != patchTarget.Target.Type {
+		skip = errors.New(fmt.Sprintf("workload Type base:%s <> patch:%s ", base.Type, patchTarget.Target.Type))
+		return
+	}
+
+	patchComponent := v1alpha1.EnvComponentPatch{
+		Properties: patchTarget.Component.Properties,
+		Traits:     patchTarget.Component.Traits,
+	}
+	pc := patchComponent.DeepCopy()
+	pc.Name = base.Name
+	pc.Type = base.Type
+	componentPatched = pc
+	return
+}
+
+func PatchApplicationBySelector(base *v1beta1.Application, selector *v1alpha1.EnvSelector) (*v1beta1.Application, error) {
+	newApp := base.DeepCopy()
+	// init components
+	compMaps := map[string]*common.ApplicationComponent{}
+	var compOrders []string
+	for _, comp := range base.Spec.Components {
+		compMaps[comp.Name] = comp.DeepCopy()
+		compOrders = append(compOrders, comp.Name)
+	}
+
+	newApp.Spec.Components = []common.ApplicationComponent{}
+
+	compOrders = filterComponents(compOrders, selector)
 	// fill in new application
 	for _, compName := range compOrders {
 		newApp.Spec.Components = append(newApp.Spec.Components, *compMaps[compName])

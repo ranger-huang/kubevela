@@ -17,178 +17,305 @@ limitations under the License.
 package multicluster
 
 import (
-	"context"
-
-	"github.com/pkg/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/oam-dev/kubevela/apis/core.oam.dev/v1alpha1"
-	"github.com/oam-dev/kubevela/apis/core.oam.dev/v1beta1"
-	"github.com/oam-dev/kubevela/pkg/clustermanager"
-	"github.com/oam-dev/kubevela/pkg/cue/model/value"
-	"github.com/oam-dev/kubevela/pkg/multicluster"
-	"github.com/oam-dev/kubevela/pkg/policy/envbinding"
-	wfContext "github.com/oam-dev/kubevela/pkg/workflow/context"
-	"github.com/oam-dev/kubevela/pkg/workflow/providers"
-	wfTypes "github.com/oam-dev/kubevela/pkg/workflow/types"
+  "context"
+  "fmt"
+  
+  "github.com/pkg/errors"
+  "sigs.k8s.io/controller-runtime/pkg/client"
+  
+  "github.com/oam-dev/kubevela/apis/core.oam.dev/v1alpha1"
+  "github.com/oam-dev/kubevela/apis/core.oam.dev/v1beta1"
+  "github.com/oam-dev/kubevela/pkg/clustermanager"
+  "github.com/oam-dev/kubevela/pkg/cue/model/value"
+  "github.com/oam-dev/kubevela/pkg/multicluster"
+  "github.com/oam-dev/kubevela/pkg/policy/envbinding"
+  wfContext "github.com/oam-dev/kubevela/pkg/workflow/context"
+  "github.com/oam-dev/kubevela/pkg/workflow/providers"
+  wfTypes "github.com/oam-dev/kubevela/pkg/workflow/types"
 )
 
 const (
-	// ProviderName is provider name for install.
-	ProviderName = "multicluster"
+  // ProviderName is provider name for install.
+  ProviderName = "multicluster"
 )
 
 type provider struct {
-	client.Client
-	app *v1beta1.Application
+  client.Client
+  app *v1beta1.Application
 }
 
 func (p *provider) ReadPlacementDecisions(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
-	policy, err := v.GetString("inputs", "policyName")
-	if err != nil {
-		return err
-	}
-	env, err := v.GetString("inputs", "envName")
-	if err != nil {
-		return err
-	}
-	decisions, exists, err := envbinding.ReadPlacementDecisions(p.app, policy, env)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return v.FillObject(map[string]interface{}{"decisions": decisions}, "outputs")
-	}
-	return v.FillObject(map[string]interface{}{}, "outputs")
+  policy, err := v.GetString("inputs", "policyName")
+  if err != nil {
+    return err
+  }
+  env, err := v.GetString("inputs", "envName")
+  if err != nil {
+    return err
+  }
+  decisions, exists, err := envbinding.ReadPlacementDecisions(p.app, policy, env)
+  if err != nil {
+    return err
+  }
+  if exists {
+    return v.FillObject(map[string]interface{}{"decisions": decisions}, "outputs")
+  }
+  return v.FillObject(map[string]interface{}{}, "outputs")
 }
 
 func (p *provider) MakePlacementDecisions(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
-	policy, err := v.GetString("inputs", "policyName")
-	if err != nil {
-		return err
-	}
-	env, err := v.GetString("inputs", "envName")
-	if err != nil {
-		return err
-	}
-	val, err := v.LookupValue("inputs", "placement")
-	if err != nil {
-		return err
-	}
-
-	// TODO detect env change
-	placement := &v1alpha1.EnvPlacement{}
-	if err = val.UnmarshalTo(placement); err != nil {
-		return errors.Wrapf(err, "failed to parse placement while making placement decision")
-	}
-
-	var namespace, clusterName string
-	// check if namespace selector is valid
-	if placement.NamespaceSelector != nil {
-		if len(placement.NamespaceSelector.Labels) != 0 {
-			return errors.Errorf("invalid env %s: namespace selector in cluster-gateway does not support label selector for now", env)
-		}
-		namespace = placement.NamespaceSelector.Name
-	}
-	// check if cluster selector is valid
-	if placement.ClusterSelector != nil {
-		if len(placement.ClusterSelector.Labels) != 0 {
-			return errors.Errorf("invalid env %s: cluster selector does not support label selector for now", env)
-		}
-		clusterName = placement.ClusterSelector.Name
-	}
-	// set fallback cluster
-	if clusterName == "" {
-		clusterName = multicluster.ClusterLocalName
-	}
-	// check if target cluster exists
-	if clusterName != multicluster.ClusterLocalName {
-		if err = clustermanager.EnsureClusterExists(p, clusterName); err != nil {
-			return errors.Wrapf(err, "failed to get cluster %s for env %s", clusterName, env)
-		}
-	}
-	// write result back
-	decisions := []v1alpha1.PlacementDecision{{
-		Cluster:   clusterName,
-		Namespace: namespace,
-	}}
-	if err = envbinding.WritePlacementDecisions(p.app, policy, env, decisions); err != nil {
-		return err
-	}
-	return v.FillObject(map[string]interface{}{"decisions": decisions}, "outputs")
+  policy, err := v.GetString("inputs", "policyName")
+  if err != nil {
+    return err
+  }
+  env, err := v.GetString("inputs", "envName")
+  if err != nil {
+    return err
+  }
+  val, err := v.LookupValue("inputs", "placement")
+  if err != nil {
+    return err
+  }
+  
+  // TODO detect env change
+  placement := &v1alpha1.EnvPlacement{}
+  if err = val.UnmarshalTo(placement); err != nil {
+    return errors.Wrapf(err, "failed to parse placement while making placement decision")
+  }
+  
+  var namespace, clusterName string
+  // check if namespace selector is valid
+  if placement.NamespaceSelector != nil {
+    if len(placement.NamespaceSelector.Labels) != 0 {
+      return errors.Errorf("invalid env %s: namespace selector in cluster-gateway does not support label selector for now", env)
+    }
+    namespace = placement.NamespaceSelector.Name
+  }
+  // check if cluster selector is valid
+  if placement.ClusterSelector != nil {
+    if len(placement.ClusterSelector.Labels) != 0 {
+      return errors.Errorf("invalid env %s: cluster selector does not support label selector for now", env)
+    }
+    clusterName = placement.ClusterSelector.Name
+  }
+  // set fallback cluster
+  if clusterName == "" {
+    clusterName = multicluster.ClusterLocalName
+  }
+  // check if target cluster exists
+  if clusterName != multicluster.ClusterLocalName {
+    if err = clustermanager.EnsureClusterExists(p, clusterName); err != nil {
+      return errors.Wrapf(err, "failed to get cluster %s for env %s", clusterName, env)
+    }
+  }
+  // write result back
+  decisions := []v1alpha1.PlacementDecision{{
+    Cluster:   clusterName,
+    Namespace: namespace,
+  }}
+  if err = envbinding.WritePlacementDecisions(p.app, policy, env, decisions); err != nil {
+    return err
+  }
+  return v.FillObject(map[string]interface{}{"decisions": decisions}, "outputs")
 }
 
 func (p *provider) PatchApplication(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
-	env, err := v.GetString("inputs", "envName")
-	if err != nil {
-		return err
-	}
-	patch := v1alpha1.EnvPatch{}
-	selector := &v1alpha1.EnvSelector{}
-
-	obj, err := v.LookupValue("inputs", "patch")
-	if err == nil {
-		if err = obj.UnmarshalTo(&patch); err != nil {
-			return errors.Wrapf(err, "failed to unmarshal patch for env %s", env)
-		}
-	}
-	obj, err = v.LookupValue("inputs", "selector")
-	if err == nil {
-		if err = obj.UnmarshalTo(selector); err != nil {
-			return errors.Wrapf(err, "failed to unmarshal selector for env %s", env)
-		}
-	} else {
-		selector = nil
-	}
-
-	newApp, err := envbinding.PatchApplication(p.app, &patch, selector)
-	if err != nil {
-		return errors.Wrapf(err, "failed to patch app for env %s", env)
-	}
-	return v.FillObject(newApp, "outputs")
+  env, err := v.GetString("inputs", "envName")
+  if err != nil {
+    return err
+  }
+  patch := v1alpha1.EnvPatch{}
+  selector := &v1alpha1.EnvSelector{}
+  
+  obj, err := v.LookupValue("inputs", "patch")
+  if err == nil {
+    if err = obj.UnmarshalTo(&patch); err != nil {
+      return errors.Wrapf(err, "failed to unmarshal patch for env %s", env)
+    }
+  }
+  obj, err = v.LookupValue("inputs", "selector")
+  if err == nil {
+    if err = obj.UnmarshalTo(selector); err != nil {
+      return errors.Wrapf(err, "failed to unmarshal selector for env %s", env)
+    }
+  } else {
+    selector = nil
+  }
+  
+  newApp, err := envbinding.PatchApplication(p.app, &patch, selector)
+  if err != nil {
+    return errors.Wrapf(err, "failed to patch app for env %s", env)
+  }
+  return v.FillObject(newApp, "outputs")
 }
 
 func (p *provider) ListClusters(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
-	secrets, err := multicluster.ListExistingClusterSecrets(context.Background(), p.Client)
-	if err != nil {
-		return err
-	}
-	var clusters []string
-	for _, secret := range secrets {
-		clusters = append(clusters, secret.Name)
-	}
-	return v.FillObject(clusters, "outputs", "clusters")
+  secrets, err := multicluster.ListExistingClusterSecrets(context.Background(), p.Client)
+  if err != nil {
+    return err
+  }
+  var clusters []string
+  for _, secret := range secrets {
+    clusters = append(clusters, secret.Name)
+  }
+  return v.FillObject(clusters, "outputs", "clusters")
 }
 
+// Deprecated
+// DispatchApplicationComponets
 func (p *provider) DispatchApplicationComponets(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
-	env, err := v.GetString("inputs", "envName")
-	if err != nil {
-		return err
-	}
-	var patches []v1alpha1.PatchTarget
-	if obj, err := v.LookupValue("inputs", "patches"); err == nil {
-		if err = obj.UnmarshalTo(&patches); err != nil {
-			return errors.Wrapf(err, "failed to unmarshal patches for env %s", env)
-		}
-	}
-	newApp := p.app
-	for _, patch := range patches {
-		newApp, err = envbinding.PatchApplicationByTarget(newApp, &patch)
-		if err != nil {
-			return errors.Wrapf(err, "failed to patch app for env %s", env)
-		}
-	}
-	return v.FillObject(newApp, "outputs")
+  env, err := v.GetString("inputs", "envName")
+  if err != nil {
+    return err
+  }
+  var patches []v1alpha1.PatchTarget
+  if obj, err := v.LookupValue("inputs", "patches"); err == nil {
+    if err = obj.UnmarshalTo(&patches); err != nil {
+      return errors.Wrapf(err, "failed to unmarshal patches for env %s", env)
+    }
+  }
+  var selector *v1alpha1.EnvSelector
+  if obj, err := v.LookupValue("inputs", "selector"); err == nil {
+    if err = obj.UnmarshalTo(&selector); err != nil {
+      return errors.Wrapf(err, "failed to unmarshal selector for env %s", env)
+    }
+  }
+  
+  var patchedApp *v1beta1.Application
+  for _, patch := range patches {
+    patchedApp, err = envbinding.PatchApplicationByTarget(p.app, &patch, selector, patchedApp)
+    if err != nil {
+      return errors.Wrapf(err, "failed to patch app for env %s", env)
+    }
+  }
+  
+  return v.FillObject(patchedApp, "outputs")
+}
+
+// PrepareEnvBinding
+func (p *provider) PrepareEnvBinding(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
+  var err error
+  var env, policy string
+  if env, err = v.GetString("inputs", "envName"); err != nil {
+    return err
+  }
+  if policy, err = v.GetString("inputs", "policy"); err != nil {
+    return err
+  }
+  
+  var patches []v1alpha1.PatchTarget = nil
+  obj, err := v.LookupValue("inputs", "patches")
+  if err == nil {
+    if err = obj.UnmarshalTo(&patches); err != nil {
+      return errors.Wrapf(err, "failed to unmarshal patches for env %s", env)
+    }
+  }
+  
+  selector := &v1alpha1.EnvSelector{}
+  obj, err = v.LookupValue("inputs", "selector")
+  if err == nil {
+    if err = obj.UnmarshalTo(selector); err != nil {
+      return errors.Wrapf(err, "failed to unmarshal selector for env %s", env)
+    }
+  } else {
+    selector = nil
+  }
+  
+  var patchedApp *v1beta1.Application = nil
+  if len(patches) > 0 {
+    for _, patch := range patches {
+      patchedApp, err = envbinding.PatchApplicationByTarget(p.app, &patch, selector, patchedApp)
+      if err != nil {
+        return errors.Wrapf(err, "failed to patch app for env %s", env)
+      }
+    }
+  } else {
+    patchedApp, err = envbinding.PatchApplicationBySelector(p.app, selector)
+    if err != nil {
+      return errors.Wrapf(err, "failed to patch app for env %s with selector", env)
+    }
+  }
+  
+  decisions, err := p.placementDecision(policy, env)
+  if err != nil {
+    return errors.Wrapf(err, "failed to fetch decisions for %s %s", policy, env)
+  }
+  
+  err = v.FillObject(map[string]interface{}{
+    "components": patchedApp.Spec.Components,
+    "decisions":  decisions,
+  }, "outputs")
+  if err != nil {
+    return errors.Wrapf(err, "failed to marshal outputs for %s %s", env, policy)
+  }
+  return nil
+}
+
+func (p *provider) placementDecision(policy, env string) ([]v1alpha1.PlacementDecision, error) {
+  var err error
+  
+  envBindingSpec, err := envbinding.GetEnvBindingPolicy(p.app, policy)
+  if err != nil {
+    return nil, err
+  }
+  
+  // TODO detect env change
+  var placement *v1alpha1.EnvPlacement = nil
+  // placement := &v1alpha1.EnvPlacement{}
+  for _, e := range envBindingSpec.Envs {
+    if e.Name == env {
+      placement = &e.Placement
+      break
+    }
+  }
+  if placement == nil {
+    return nil, errors.New(fmt.Sprintf("env %s not found in policy %s", env, policy))
+  }
+  
+  var namespace, clusterName string
+  // check if namespace selector is valid
+  if placement.NamespaceSelector != nil {
+    if len(placement.NamespaceSelector.Labels) != 0 {
+      return nil, errors.Errorf("invalid env %s: namespace selector in cluster-gateway does not support label selector for now", env)
+    }
+    namespace = placement.NamespaceSelector.Name
+  }
+  // check if cluster selector is valid
+  if placement.ClusterSelector != nil {
+    if len(placement.ClusterSelector.Labels) != 0 {
+      return nil, errors.Errorf("invalid env %s: cluster selector does not support label selector for now", env)
+    }
+    clusterName = placement.ClusterSelector.Name
+  }
+  // set fallback cluster
+  if clusterName == "" {
+    clusterName = multicluster.ClusterLocalName
+  }
+  // check if target cluster exists
+  if clusterName != multicluster.ClusterLocalName {
+    if err = clustermanager.EnsureClusterExists(p, clusterName); err != nil {
+      return nil, errors.Wrapf(err, "failed to get cluster %s for env %s", clusterName, env)
+    }
+  }
+  // write result back
+  decisions := []v1alpha1.PlacementDecision{{
+    Cluster:   clusterName,
+    Namespace: namespace,
+  }}
+  if err = envbinding.WritePlacementDecisions(p.app, policy, env, decisions); err != nil {
+    return nil, err
+  }
+  return decisions, nil
 }
 
 // Install register handlers to provider discover.
 func Install(p providers.Providers, c client.Client, app *v1beta1.Application) {
-	prd := &provider{Client: c, app: app}
-	p.Register(ProviderName, map[string]providers.Handler{
-		"read-placement-decisions":        prd.ReadPlacementDecisions,
-		"make-placement-decisions":        prd.MakePlacementDecisions,
-		"patch-application":               prd.PatchApplication,
-		"list-clusters":                   prd.ListClusters,
-		"dispatch-application-components": prd.DispatchApplicationComponets,
-	})
+  prd := &provider{Client: c, app: app}
+  p.Register(ProviderName, map[string]providers.Handler{
+    "read-placement-decisions": prd.ReadPlacementDecisions,
+    "make-placement-decisions": prd.MakePlacementDecisions,
+    "patch-application":        prd.PatchApplication,
+    "list-clusters":            prd.ListClusters,
+    "prepare-env-binding":      prd.PrepareEnvBinding,
+  })
 }

@@ -17,25 +17,11 @@ template: { // NOTE: Template Start
         // +usage=Declare the name of the env in policy
         env: string
         parallel: *false | bool
-        patches?: [...{
-            target: {
-                type: string
-            }
-            component: #ComponentBody
-        }]
+		selector?: components: [...string]
+        patches: [...#PatchTarget]
     }
+    parameter: patches: parameter.patches // NOTE: 强制解析
     // NOTE: END parameter
-
-    // NOTE: Main Processing
-    app: #ApplyEnvBindApp & {
-        env:    parameter.env
-        policy: parameter.policy
-        app:    context.name
-        // context.namespace indicates the namespace of the app
-        namespace: context.namespace
-        parallel: parameter.parallel
-        patches: parameter.patches
-    }
 
     // NOTE: Definitions
     #PlacementDecision: {
@@ -43,6 +29,13 @@ template: { // NOTE: Template Start
         cluster?:   string
     }
 
+    #PatchTarget: {
+       target: {
+           type: string
+           selector: [...string]
+       }
+       component: #ComponentBody
+    }
     #Component: {
         name: string
         type: string
@@ -58,120 +51,29 @@ template: { // NOTE: Template Start
         ...
     }
 
-    #ApplyEnvBindApp: {
-        #do: "steps"
+    #PrepareEnvBinding: {
+        #provider: "multicluster"
+        #do:       "prepare-env-binding"
+        #type: "PrepareEnvBinding"
 
-        env:       string
-        policy:    string
-        app:       string
-        namespace: string
-        parallel:  bool
-
-        patches?: [...{
-            target: {
-                type: string
-            }
-            component: #ComponentBody
-        }]
-
-        env_:     env
-        policy_:  policy
-        patches_: patches
-
-        prepare: #PrepareEnvBinding & {
-            inputs: {
-                env:    env_
-                policy: policy_
-                patches: patches_
-            }
-        } @step(1)
-
-        apply: #ApplyComponentsToEnv & {
-            inputs: {
-                decisions:   prepare.outputs.decisions
-                components:  prepare.outputs.components
-                env:         env_
-                waitHealthy: !parallel
-            }
-        } @step(2)
-
-        if parallel {
-            wait: #ApplyComponentsToEnv & {
-                inputs: {
-                    decisions:   prepare.outputs.decisions
-                    components:  prepare.outputs.components
-                    env:         env_
-                    waitHealthy: true
-                }
-            } @step(3)
-        }
-    }
-    // NOTE: END ApplyEnvBindApp
-
-    #PrepareEnvBinding: op.#Steps & {
         inputs: {
-            env:    string
-            policy: string
-            patches?: [...{
-                target: {
-                    type: string
-                }
-                component: #ComponentBody
-            }]
+            envName: string
+            policy:  string
+            selector?: components: [...string]
+            patches: [...#PatchTarget]
         }
-        env_:     inputs.env     @step(1)
-        policy_:  inputs.policy  @step(1)
-        patches_: inputs.patches @step(1)
-
-        loadEnv: #LoadEnvBindingEnv & {
-            inputs: {
-                env:    env_
-                policy: policy_
-            }
-        }   @step(1)
-        envConfig: loadEnv.outputs.envConfig
-
-        placementDecisions: op.#MakePlacementDecisions & {
-            inputs: {
-                policyName: loadEnv.outputs.policy
-                envName:    env_
-                placement:  envConfig.placement
-            }
-        } @step(2)
-
-        pa: op.#Steps & {
-            patchedApp: {...}
-            if patches_ == _|_ {
-                patchedApp: op.#PatchApplication & {
-                    inputs: {
-                        envName: env_
-                        if envConfig.selector != _|_ {
-                            selector: envConfig.selector
-                        }
-                        if envConfig.patch != _|_ {
-                            patch: envConfig.patch
-                        }
-                    }
-                }
-            }
-            if patches_ != _|_ {
-                patchedApp: #PatchToAllComponents & {
-                    inputs: {
-                        envName: env_
-                        patches: patches_
-                    }
-                }
-            }
-        } @step(3)
 
         outputs: {
-            components: pa.patchedApp.outputs.spec.components
-            decisions:  placementDecisions.outputs.decisions
+            // components: [...#Component]
+            // decisions: [...#PlacementDecision]
+            ...
         }
+        ...
     }
     // NOTE: END PrepareEnvBinding
 
     #ApplyComponentsToEnv: op.#Steps & {
+        #type: "ApplyComponentsToEnv"
         inputs: {
             decisions: [...#PlacementDecision]
             components: [...#Component]
@@ -199,54 +101,71 @@ template: { // NOTE: Template Start
     }
     // NOTE: END ApplyComponentsToEnv
 
-    #PatchToAllComponents: {
-      #provider: "multicluster"
-      #do:       "dispatch-application-components"
-      inputs: {
-        envName: string
-        patches: [...{
-            target: {
-                type: string
+    // NOTE: Main
+    #ApplyEnvBindApp: {
+        #do: "steps"
+        #type: "ApplyEnvBindApp"
+        env:       string
+        policy:    string
+        app:       string
+        namespace: string
+        parallel:  bool
+		selector?: components: [...string]
+        patches: [...#PatchTarget]
+
+        env_:     env
+        policy_:  policy
+        patches_: patches
+        selector_: selector
+
+        prepare: #PrepareEnvBinding & {
+            #exec: "prepare-env-binding"
+            inputs: {
+                envName:  env_
+                policy:   policy_
+                patches:  patches_
+                if selector_ != _|_ {
+                    selector: selector_
+                }
             }
-            component: #ComponentBody
-        }]
-      }
-      outputs: {...}
-      ...
-    }
-    // NOTE: END PatchToAllComponents
+        } @step(1)
 
-    #LoadEnvBindingEnv: op.#Steps & {
-        inputs: {
-            env:    string
-            policy: string
-        }
-
-        loadPolicies: op.#LoadPolicies @step(1)
-        policy_:      string
-        if inputs.policy == "" {
-            envBindingPolicies: [ for k, v in loadPolicies.value if v.type == "env-binding" {k}]
-            policy_: envBindingPolicies[0]
-        }
-        if inputs.policy != "" {
-            policy_: inputs.policy
-        }
-
-        loadPolicy: loadPolicies.value["\(policy_)"]
-        envMap: {
-            for ev in loadPolicy.properties.envs {
-                "\(ev.name)": ev
+        apply: #ApplyComponentsToEnv & {
+            inputs: {
+                decisions:   prepare.outputs.decisions
+                components:  prepare.outputs.components
+                env:         env_
+                waitHealthy: !parallel
             }
-            ...
-        }
-        envConfig_: envMap["\(inputs.env)"]
+        } @step(2)
 
-        outputs: {
-            policy:    policy_
-            envConfig: envConfig_
+        if parallel {
+            wait: #ApplyComponentsToEnv & {
+                inputs: {
+                    decisions:   prepare.outputs.decisions
+                    components:  prepare.outputs.components
+                    env:         env_
+                    waitHealthy: true
+                }
+            } @step(3)
         }
     }
-    // NOTE: END LoadEnvBindingEnv
+    // NOTE: END ApplyEnvBindApp
     // NOTE: END Definitions
+
+    // NOTE: Main Processing
+    app: #ApplyEnvBindApp & {
+        #exec: "apply-env-bind-app"
+        env:    parameter.env
+        policy: parameter.policy
+        app:    context.name
+        // context.namespace indicates the namespace of the app
+        namespace: context.namespace
+        parallel:  parameter.parallel
+        patches:   parameter.patches
+        if parameter.selector != _|_ {
+          selector:  parameter.selector
+        }
+    }
 
 } // NOTE: Template End
