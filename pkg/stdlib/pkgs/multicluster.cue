@@ -54,7 +54,7 @@
 	}
 }
 
-#PatchApplication: {
+#PatchApplication: { // TODO IMPLEMENT select components
 	#provider: "multicluster"
 	#do:       "patch-application"
 
