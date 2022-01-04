@@ -161,37 +161,6 @@ func (p *provider) ListClusters(ctx wfContext.Context, v *value.Value, act wfTyp
   return v.FillObject(clusters, "outputs", "clusters")
 }
 
-// Deprecated
-// DispatchApplicationComponets
-func (p *provider) DispatchApplicationComponets(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
-  env, err := v.GetString("inputs", "envName")
-  if err != nil {
-    return err
-  }
-  var patches []v1alpha1.PatchTarget
-  if obj, err := v.LookupValue("inputs", "patches"); err == nil {
-    if err = obj.UnmarshalTo(&patches); err != nil {
-      return errors.Wrapf(err, "failed to unmarshal patches for env %s", env)
-    }
-  }
-  var selector *v1alpha1.EnvSelector
-  if obj, err := v.LookupValue("inputs", "selector"); err == nil {
-    if err = obj.UnmarshalTo(&selector); err != nil {
-      return errors.Wrapf(err, "failed to unmarshal selector for env %s", env)
-    }
-  }
-  
-  var patchedApp *v1beta1.Application
-  for _, patch := range patches {
-    patchedApp, err = envbinding.PatchApplicationByTarget(p.app, &patch, selector, patchedApp)
-    if err != nil {
-      return errors.Wrapf(err, "failed to patch app for env %s", env)
-    }
-  }
-  
-  return v.FillObject(patchedApp, "outputs")
-}
-
 // PrepareEnvBinding
 func (p *provider) PrepareEnvBinding(ctx wfContext.Context, v *value.Value, act wfTypes.Action) error {
   var err error
