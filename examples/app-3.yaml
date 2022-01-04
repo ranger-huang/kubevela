@@ -1,0 +1,139 @@
+apiVersion: core.oam.dev/v1beta1
+kind: Application
+metadata:
+  creationTimestamp: null
+  name: crm-core
+  namespace: default
+spec:
+  policies:
+    - name: multi-park
+      properties:
+        envs:
+          - name: group-spec
+            placement:
+              clusterSelector:
+                name: local-cls
+              namespaceSelector:
+                name: default
+      type: env-binding
+  workflow:
+    steps:
+      - name: deploy-spec
+        type: deploy2env
+        properties:
+          policy: multi-park
+          env:    group-spec
+          patches:
+            - target:
+                type: microservice
+              component:
+                properties:
+                  image:
+                    tag: "1.20"
+          #      traits:
+          #        - type: route-ingress
+          #          properties:
+          #            subdomain: "spec-0"
+          #            domain: myapp.com
+          #            rules: [{}]
+
+  components:
+  - name: crm-core-service
+    properties:
+      image:
+        registry: "docker.io"
+        repository: "library/nginx"
+        tag: "latest"
+    scopes:
+      healthscopes.core.oam.dev: crm-core-default-health
+    traits:
+    - properties:
+        ports:
+        - name: http
+          servicePort: 80
+      type: expose
+    - properties:
+        labels:
+          ddd.domain: crm
+          ddd.subdomain: core
+        type: both
+      type: label-workload
+    type: microservice
+  - name: crm-core-worker
+    properties:
+      image:
+        registry: "docker.io"
+        repository: "library/nginx"
+        tag: "latest"
+    scopes:
+      healthscopes.core.oam.dev: crm-core-default-health
+    traits:
+    - properties:
+        labels:
+          ddd.domain: crm
+          ddd.subdomain: core
+        type: both
+      type: label-workload
+    - properties:
+        ports:
+        - name: http
+          servicePort: 80
+      type: expose
+    type: microservice
+  - name: crm-core-customer
+    properties:
+      image:
+        registry: "docker.io"
+        repository: "library/nginx"
+        tag: "latest"
+    scopes:
+      healthscopes.core.oam.dev: crm-core-default-health
+    traits:
+    - properties:
+        ports:
+        - name: http
+          servicePort: 80
+      type: expose
+    - properties:
+        labels:
+          ddd.domain: crm
+          ddd.subdomain: core
+        type: both
+      type: label-workload
+    - type: route-ingress
+      properties:
+        subdomain: "default"
+        domain: "k8s.local"
+        rules:
+          - {} # { path: / , servicePort: 80 }
+    type: microservice
+  - name: crm-core-cache
+    properties:
+      chart: redis
+      repoType: helm
+      url: https://charts.bitnami.com/bitnami
+      version: 15.6.7
+      values:
+        architecture: standalone
+        master:
+          persistence:
+            enabled: false
+        replica:
+          persistence:
+            enabled: false
+    type: helm
+status: {}
+
+---
+apiVersion: core.oam.dev/v1alpha2
+kind: HealthScope
+metadata:
+  creationTimestamp: null
+  name: crm-core-default-health
+  namespace: default
+spec:
+  workloadRefs: []
+status:
+  scopeHealthCondition:
+    healthStatus: ""
+

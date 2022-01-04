@@ -19,8 +19,8 @@ template: { // NOTE: Template Start
         parallel: *false | bool
 		selector?: components: [...string]
         patches: [...#PatchTarget]
+        _patched: len(patches) > 0
     }
-    parameter: patches: parameter.patches // NOTE: 强制解析
     // NOTE: END parameter
 
     // NOTE: Definitions
