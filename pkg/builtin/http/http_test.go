@@ -121,6 +121,11 @@ url: "https://127.0.0.1:8443/api/v1/token?val=test-token"`)
 	body := (got.(map[string]interface{}))["body"].(string)
 
 	assert.Equal(t, "{\"token\":\"test-token\"}", body)
+
+	status_code := (got.(map[string]interface{}))["status_code"].(string)
+	status := (got.(map[string]interface{}))["status"].(string)
+	assert.Equal(t, "200", status_code)
+	assert.Equal(t, "200 OK", status)
 }
 
 // NewMock mock the http server
